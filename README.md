@@ -73,6 +73,7 @@ OpenFootball does not need an API key.
 - `docs/supabase-rls.sql`: invite-code and Row Level Security setup.
 - `docs/supabase-league-state.sql`: realtime room state table for the MVP.
 - `docs/supabase-grants.sql`: Data API grants required when automatic table exposure is disabled.
+- `docs/supabase-realtime.sql`: enables live updates for room membership and draft/scores state.
 - `docs/supabase-setup.md`: Supabase environment and database setup notes.
 - `docs/player-import.md`: instructions for importing full World Cup squads into Supabase.
 - `docs/world-cup-2026-players.csv`: extracted 48-team player pool from the uploaded FIFA squad PDF.

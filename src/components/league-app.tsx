@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type DraftPlayer,
@@ -54,6 +54,7 @@ type LeagueStateRow = {
 type Tab = "league" | "draft" | "scores";
 
 const activeLeagueKey = "world-cup-fantasy-active-league";
+const activeTabKey = "world-cup-fantasy-active-tab";
 
 export function LeagueApp() {
   const [leagueId, setLeagueId] = useState("");
@@ -64,7 +65,7 @@ export function LeagueApp() {
   const [joinCode, setJoinCode] = useState("");
   const [draftOrder, setDraftOrder] = useState<string[]>([]);
   const [picks, setPicks] = useState<Pick[]>([]);
-  const [activeTab, setActiveTab] = useState<Tab>("league");
+  const [activeTab, setActiveTab] = useState<Tab>(() => readSavedTab());
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState("ALL");
   const [playerPool, setPlayerPool] = useState<DraftPlayer[]>(samplePlayers);
@@ -75,8 +76,26 @@ export function LeagueApp() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("Connecting to Supabase...");
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const previousDraftStarted = useRef(false);
+
+  const currentUserMember = members.find((member) => member.userId === userId);
+  const isHost = currentUserMember?.isHost ?? false;
+  const roundCount = 6;
+  const totalPicks = members.length * roundCount;
+  const draftComplete = totalPicks > 0 && picks.length >= totalPicks;
+  const currentPickNumber = picks.length + 1;
+  const currentMemberId =
+    draftOrder.length && !draftComplete && currentPickNumber <= totalPicks
+      ? getMemberForPick(draftOrder, currentPickNumber)
+      : null;
+  const currentMember = members.find((member) => member.id === currentMemberId);
+  const draftedPlayerIds = new Set(picks.map((pick) => pick.player.id));
 
   useEffect(() => {
+    if (draftComplete) {
+      return;
+    }
+
     const interval = window.setInterval(() => {
       setTimer((current) =>
         current > 0 && draftOrder.length ? current - 1 : current,
@@ -84,19 +103,21 @@ export function LeagueApp() {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [draftOrder.length]);
+  }, [draftComplete, draftOrder.length]);
 
-  const currentUserMember = members.find((member) => member.userId === userId);
-  const isHost = currentUserMember?.isHost ?? false;
-  const roundCount = 6;
-  const totalPicks = members.length * roundCount;
-  const currentPickNumber = picks.length + 1;
-  const currentMemberId =
-    draftOrder.length && currentPickNumber <= totalPicks
-      ? getMemberForPick(draftOrder, currentPickNumber)
-      : null;
-  const currentMember = members.find((member) => member.id === currentMemberId);
-  const draftedPlayerIds = new Set(picks.map((pick) => pick.player.id));
+  useEffect(() => {
+    window.localStorage.setItem(activeTabKey, activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const draftStarted = draftOrder.length > 0;
+
+    if (draftStarted && !previousDraftStarted.current && activeTab === "league") {
+      setActiveTab("draft");
+    }
+
+    previousDraftStarted.current = draftStarted;
+  }, [activeTab, draftOrder.length]);
 
   const rosters = useMemo(() => {
     return Object.fromEntries(
@@ -367,6 +388,20 @@ export function LeagueApp() {
     };
   }, [leagueId]);
 
+  useEffect(() => {
+    if (!leagueId) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void loadMembers(leagueId);
+      void loadLeagueState(leagueId);
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+    // Polling is a fallback for missed Realtime events on mobile/local dev.
+  }, [leagueId]);
+
   async function saveLeagueState(nextState: {
     draftOrder?: string[];
     picks?: Pick[];
@@ -552,10 +587,16 @@ export function LeagueApp() {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+            <div
+              className={`grid gap-2 text-center text-sm ${
+                draftComplete ? "grid-cols-2" : "grid-cols-3"
+              }`}
+            >
               <Stat label="Members" value={`${members.length}/10`} />
               <Stat label="Picks" value={`${picks.length}/${totalPicks}`} />
-              <Stat label="Timer" value={formatTimer(timer)} />
+              {!draftComplete ? (
+                <Stat label="Timer" value={formatTimer(timer)} />
+              ) : null}
             </div>
           </div>
 
@@ -616,6 +657,7 @@ export function LeagueApp() {
             currentUserMember={currentUserMember}
             draftOrder={draftOrder}
             draftPlayer={draftPlayer}
+            draftComplete={draftComplete}
             isHost={isHost}
             members={members}
             picks={picks}
@@ -838,6 +880,7 @@ function DraftPanel(props: {
   currentUserMember?: Member;
   draftOrder: string[];
   draftPlayer: (player: DraftPlayer) => void;
+  draftComplete: boolean;
   isHost: boolean;
   members: Member[];
   picks: Pick[];
@@ -859,7 +902,8 @@ function DraftPanel(props: {
     );
   }
 
-  const canPick = props.currentUserMember?.id === props.currentMember?.id;
+  const canPick =
+    !props.draftComplete && props.currentUserMember?.id === props.currentMember?.id;
 
   return (
     <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
@@ -867,13 +911,15 @@ function DraftPanel(props: {
         <Panel title="On The Clock">
           <div className="bg-[#103d35] p-4 text-white sm:p-5">
             <p className="text-xs uppercase tracking-[0.18em] text-[#f4c84b]">
-              Current pick
+              {props.draftComplete ? "Draft status" : "Current pick"}
             </p>
             <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">
               {props.currentMember?.name ?? "Draft complete"}
             </h2>
             <p className="mt-2 text-sm text-white/70">
-              Pick {props.picks.length + 1} of {props.totalPicks}
+              {props.draftComplete
+                ? "All rosters are complete."
+                : `Pick ${props.picks.length + 1} of ${props.totalPicks}`}
             </p>
           </div>
 
@@ -922,9 +968,14 @@ function DraftPanel(props: {
       </div>
 
       <Panel title="Player Pool">
-        {!canPick ? (
+        {!canPick && !props.draftComplete ? (
           <p className="mb-4 text-sm text-black/55">
             Waiting for {props.currentMember?.name} to pick.
+          </p>
+        ) : null}
+        {props.draftComplete ? (
+          <p className="mb-4 text-sm text-black/55">
+            Draft complete. Player selection is closed.
           </p>
         ) : null}
         <p className="mb-4 text-sm text-black/55">
@@ -1154,4 +1205,18 @@ function normalizePosition(position: string): DraftPlayer["position"] {
   if (normalized.includes("DEF")) return "DEF";
   if (normalized.includes("MID")) return "MID";
   return "FWD";
+}
+
+function readSavedTab(): Tab {
+  if (typeof window === "undefined") {
+    return "league";
+  }
+
+  const saved = window.localStorage.getItem(activeTabKey);
+
+  if (saved === "league" || saved === "draft" || saved === "scores") {
+    return saved;
+  }
+
+  return "league";
 }

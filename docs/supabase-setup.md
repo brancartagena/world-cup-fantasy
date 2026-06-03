@@ -49,6 +49,14 @@ docs/supabase-grants.sql
 
 This grants the Supabase API roles access to the tables. Row Level Security still controls which rows they can read or write.
 
+For live room updates, run:
+
+```txt
+docs/supabase-realtime.sql
+```
+
+The app also polls every 3 seconds as a fallback, but Realtime makes draft turns and score updates appear faster.
+
 ## Auth
 
 Enable anonymous auth so friends can join without creating accounts:
