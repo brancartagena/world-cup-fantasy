@@ -938,11 +938,12 @@ function LeaguePanel(props: {
         </Panel>
 
         <Panel title="Rules">
-          <div className="grid gap-1">
-            {draftRules.map((rule) => (
-              <RuleRow key={rule.label} label={rule.label} value={rule.value} />
-            ))}
-          </div>
+          <CompactRulesList
+            rules={draftRules.map((rule) => ({
+              label: rule.label,
+              value: rule.value,
+            }))}
+          />
         </Panel>
       </div>
 
@@ -1377,14 +1378,33 @@ function ScoresPanel(props: {
         </Panel>
 
         <Panel title="Scoring Rules">
-          <div className="grid gap-1">
-            {scoringRules.map((rule) => (
-              <RuleRow key={rule.event} label={rule.event} value={rule.points} />
-            ))}
-          </div>
+          <CompactRulesList
+            rules={scoringRules.map((rule) => ({
+              label: rule.event,
+              value: rule.points,
+            }))}
+          />
         </Panel>
       </div>
     </section>
+  );
+}
+
+function CompactRulesList(props: { rules: Array<{ label: string; value: string }> }) {
+  return (
+    <div className="overflow-hidden border border-black/10">
+      {props.rules.map((rule) => (
+        <div
+          className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-black/10 px-3 py-2 text-sm last:border-b-0"
+          key={rule.label}
+        >
+          <span className="min-w-0 text-black/68">{rule.label}</span>
+          <span className="rounded bg-[#f3f0e8] px-2 py-1 text-xs font-semibold text-black">
+            {rule.value}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1405,15 +1425,6 @@ function Panel(props: { children: React.ReactNode; title: string }) {
       <h2 className="text-lg font-semibold sm:text-xl">{props.title}</h2>
       <div className="mt-4">{props.children}</div>
     </section>
-  );
-}
-
-function RuleRow(props: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1 border-b border-black/10 py-3 text-sm sm:flex sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-black/60">{props.label}</span>
-      <span className="font-semibold sm:text-right">{props.value}</span>
-    </div>
   );
 }
 
