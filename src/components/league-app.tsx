@@ -69,8 +69,14 @@ type WorldCupMatch = {
 
 type Tab = "league" | "draft" | "scores";
 
+type AudioWindow = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
+
 const activeLeagueKey = "world-cup-fantasy-active-league";
 const activeTabKey = "world-cup-fantasy-active-tab";
+const soundEnabledKey = "world-cup-fantasy-sound-enabled";
 
 export function LeagueApp() {
   const [leagueId, setLeagueId] = useState("");
@@ -97,8 +103,12 @@ export function LeagueApp() {
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [matchesError, setMatchesError] = useState("");
   const [matchesUpdatedAt, setMatchesUpdatedAt] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(() => readSavedSoundEnabled());
   const previousDraftStarted = useRef(false);
   const autoPickingRef = useRef(false);
+  const previousDraftOrderCount = useRef(0);
+  const previousPickCount = useRef(0);
+  const soundUnlockedRef = useRef(false);
 
   const currentUserMember = members.find((member) => member.userId === userId);
   const isHost = currentUserMember?.isHost ?? false;
@@ -142,6 +152,10 @@ export function LeagueApp() {
   }, [activeTab]);
 
   useEffect(() => {
+    window.localStorage.setItem(soundEnabledKey, String(soundEnabled));
+  }, [soundEnabled]);
+
+  useEffect(() => {
     const draftStarted = draftOrder.length > 0;
 
     if (draftStarted && !previousDraftStarted.current && activeTab === "league") {
@@ -150,6 +164,26 @@ export function LeagueApp() {
 
     previousDraftStarted.current = draftStarted;
   }, [activeTab, draftOrder.length]);
+
+  useEffect(() => {
+    if (previousDraftOrderCount.current === 0 && draftOrder.length > 0) {
+      playAppSound("draft-lock", soundEnabled, soundUnlockedRef);
+    }
+
+    previousDraftOrderCount.current = draftOrder.length;
+  }, [draftOrder.length, soundEnabled]);
+
+  useEffect(() => {
+    if (previousPickCount.current > 0 && picks.length > previousPickCount.current) {
+      playAppSound(
+        picks.length >= totalPicks ? "draft-complete" : "pick-made",
+        soundEnabled,
+        soundUnlockedRef,
+      );
+    }
+
+    previousPickCount.current = picks.length;
+  }, [picks.length, soundEnabled, totalPicks]);
 
   const rosters = useMemo(() => {
     return Object.fromEntries(
@@ -518,6 +552,10 @@ export function LeagueApp() {
   }
 
   async function lockDraftOrder() {
+    if (!isHost || members.length < 2 || draftOrder.length || draftComplete) {
+      return;
+    }
+
     const nextDraftOrder = getDraftOrder(
       members.map((member) => member.id),
       `${leagueId}:${leagueName}`,
@@ -527,6 +565,9 @@ export function LeagueApp() {
     setPicks([]);
     setTimer(120);
     setActiveTab("draft");
+    unlockAppSound(soundUnlockedRef);
+    playAppSound("draft-lock", soundEnabled, soundUnlockedRef);
+    previousDraftOrderCount.current = nextDraftOrder.length;
     await saveLeagueState({ draftOrder: nextDraftOrder, picks: [] });
     await supabase
       .from("leagues")
@@ -625,6 +666,17 @@ export function LeagueApp() {
     window.setTimeout(() => setCopiedInvite(false), 1800);
   }
 
+  function toggleSound() {
+    const nextSoundEnabled = !soundEnabled;
+
+    setSoundEnabled(nextSoundEnabled);
+
+    if (nextSoundEnabled) {
+      unlockAppSound(soundUnlockedRef);
+      playAppSound("draft-lock", true, soundUnlockedRef);
+    }
+  }
+
   async function draftPlayer(player: DraftPlayer) {
     if (!currentMemberId) {
       return;
@@ -650,6 +702,12 @@ export function LeagueApp() {
 
     setPicks(nextPicks);
     setTimer(120);
+    playAppSound(
+      nextPicks.length >= totalPicks ? "draft-complete" : "pick-made",
+      soundEnabled,
+      soundUnlockedRef,
+    );
+    previousPickCount.current = nextPicks.length;
     await saveLeagueState({ picks: nextPicks });
   }
 
@@ -772,6 +830,14 @@ export function LeagueApp() {
                 >
                   {copiedInvite ? "Copied" : "Copy Code"}
                 </button>
+                <button
+                  aria-pressed={soundEnabled}
+                  className="rounded border border-white/25 px-3 py-2 text-xs font-semibold text-white/82"
+                  onClick={toggleSound}
+                  type="button"
+                >
+                  {soundEnabled ? "Sound On" : "Sound Off"}
+                </button>
               </div>
             </div>
             <div
@@ -826,6 +892,7 @@ export function LeagueApp() {
 
         {activeTab === "league" ? (
           <LeaguePanel
+            draftComplete={draftComplete}
             draftOrder={draftOrder}
             deleteRoom={deleteRoom}
             inviteCode={inviteCode}
@@ -973,6 +1040,7 @@ function RoomGate(props: {
 
 function LeaguePanel(props: {
   deleteRoom: () => void;
+  draftComplete: boolean;
   draftOrder: string[];
   inviteCode: string;
   isHost: boolean;
@@ -998,14 +1066,13 @@ function LeaguePanel(props: {
               {props.inviteCode}
             </div>
           </div>
-          <button
-            className="mt-4 min-h-12 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
-            disabled={!props.isHost || props.members.length < 2}
-            onClick={props.lockDraftOrder}
-            type="button"
-          >
-            Lock Draft Order
-          </button>
+          <DraftRoomAction
+            draftComplete={props.draftComplete}
+            draftOrder={props.draftOrder}
+            isHost={props.isHost}
+            lockDraftOrder={props.lockDraftOrder}
+            memberCount={props.members.length}
+          />
           {!props.isHost ? (
             <p className="mt-3 text-sm text-black/55">
               Waiting for the host to manage the draft.
@@ -1081,6 +1148,47 @@ function LeaguePanel(props: {
         />
       </div>
     </section>
+  );
+}
+
+function DraftRoomAction(props: {
+  draftComplete: boolean;
+  draftOrder: string[];
+  isHost: boolean;
+  lockDraftOrder: () => void;
+  memberCount: number;
+}) {
+  if (props.draftComplete) {
+    return (
+      <div className="mt-4 border border-[#103d35]/20 bg-[#eef5ef] px-4 py-3">
+        <div className="text-sm font-semibold text-[#103d35]">Draft complete</div>
+        <p className="mt-1 text-sm text-black/58">
+          Rosters are locked until the next transfer window.
+        </p>
+      </div>
+    );
+  }
+
+  if (props.draftOrder.length) {
+    return (
+      <div className="mt-4 border border-black/10 bg-[#f3f0e8] px-4 py-3">
+        <div className="text-sm font-semibold">Draft in progress</div>
+        <p className="mt-1 text-sm text-black/58">
+          The order is locked and picks are live.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className="mt-4 min-h-12 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
+      disabled={!props.isHost || props.memberCount < 2}
+      onClick={props.lockDraftOrder}
+      type="button"
+    >
+      Lock Draft Order
+    </button>
   );
 }
 
@@ -1562,6 +1670,106 @@ function selectAutoPick(
     })[0];
 }
 
+function unlockAppSound(unlockedRef: React.MutableRefObject<boolean>) {
+  if (unlockedRef.current || typeof window === "undefined") {
+    return;
+  }
+
+  const AudioContextClass = getAudioContextClass();
+
+  if (!AudioContextClass) {
+    return;
+  }
+
+  const audioContext = new AudioContextClass();
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+
+  gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.01);
+  unlockedRef.current = true;
+
+  window.setTimeout(() => {
+    void audioContext.close();
+  }, 40);
+}
+
+function playAppSound(
+  sound: "draft-lock" | "draft-complete" | "pick-made",
+  enabled: boolean,
+  unlockedRef: React.MutableRefObject<boolean>,
+) {
+  if (!enabled || typeof window === "undefined") {
+    return;
+  }
+
+  const AudioContextClass = getAudioContextClass();
+
+  if (!AudioContextClass) {
+    return;
+  }
+
+  const audioContext = new AudioContextClass();
+  const notes = getSoundNotes(sound);
+
+  notes.forEach((note) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const startsAt = audioContext.currentTime + note.start;
+    const endsAt = startsAt + note.duration;
+
+    oscillator.type = sound === "pick-made" ? "sine" : "triangle";
+    oscillator.frequency.setValueAtTime(note.frequency, startsAt);
+    gain.gain.setValueAtTime(0.0001, startsAt);
+    gain.gain.exponentialRampToValueAtTime(0.11, startsAt + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, endsAt);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(startsAt);
+    oscillator.stop(endsAt);
+  });
+
+  unlockedRef.current = true;
+
+  window.setTimeout(() => {
+    void audioContext.close();
+  }, sound === "draft-complete" ? 1150 : 650);
+}
+
+function getSoundNotes(sound: "draft-lock" | "draft-complete" | "pick-made") {
+  if (sound === "draft-lock") {
+    return [
+      { frequency: 392, start: 0, duration: 0.11 },
+      { frequency: 523.25, start: 0.1, duration: 0.13 },
+      { frequency: 659.25, start: 0.22, duration: 0.18 },
+    ];
+  }
+
+  if (sound === "draft-complete") {
+    return [
+      { frequency: 523.25, start: 0, duration: 0.1 },
+      { frequency: 659.25, start: 0.09, duration: 0.1 },
+      { frequency: 783.99, start: 0.18, duration: 0.12 },
+      { frequency: 1046.5, start: 0.32, duration: 0.2 },
+      { frequency: 1318.51, start: 0.5, duration: 0.25 },
+    ];
+  }
+
+  return [
+    { frequency: 659.25, start: 0, duration: 0.07 },
+    { frequency: 880, start: 0.08, duration: 0.09 },
+  ];
+}
+
+function getAudioContextClass() {
+  const audioWindow = window as AudioWindow;
+
+  return audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+}
+
 function formatTimer(seconds: number) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -1618,4 +1826,12 @@ function readSavedTab(): Tab {
   }
 
   return "league";
+}
+
+function readSavedSoundEnabled() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return window.localStorage.getItem(soundEnabledKey) !== "false";
 }
