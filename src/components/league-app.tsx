@@ -98,6 +98,7 @@ export function LeagueApp() {
   const [matchesError, setMatchesError] = useState("");
   const [matchesUpdatedAt, setMatchesUpdatedAt] = useState("");
   const previousDraftStarted = useRef(false);
+  const autoPickingRef = useRef(false);
 
   const currentUserMember = members.find((member) => member.userId === userId);
   const isHost = currentUserMember?.isHost ?? false;
@@ -125,6 +126,16 @@ export function LeagueApp() {
 
     return () => window.clearInterval(interval);
   }, [draftComplete, draftOrder.length]);
+
+  useEffect(() => {
+    if (!draftOrder.length || draftComplete) {
+      return;
+    }
+
+    const resetTimer = window.setTimeout(() => setTimer(120), 0);
+
+    return () => window.clearTimeout(resetTimer);
+  }, [draftComplete, draftOrder.length, picks.length]);
 
   useEffect(() => {
     window.localStorage.setItem(activeTabKey, activeTab);
@@ -472,6 +483,21 @@ export function LeagueApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId]);
 
+  useEffect(() => {
+    if (
+      timer > 0 ||
+      !leagueId ||
+      !draftOrder.length ||
+      draftComplete ||
+      !currentMemberId
+    ) {
+      return;
+    }
+
+    void autoPickCurrentTurn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timer, leagueId, draftOrder.length, draftComplete, currentMemberId]);
+
   async function saveLeagueState(nextState: {
     draftOrder?: string[];
     picks?: Pick[];
@@ -625,6 +651,66 @@ export function LeagueApp() {
     setPicks(nextPicks);
     setTimer(120);
     await saveLeagueState({ picks: nextPicks });
+  }
+
+  async function autoPickCurrentTurn() {
+    if (autoPickingRef.current || !leagueId) {
+      return;
+    }
+
+    autoPickingRef.current = true;
+
+    try {
+      const { data } = await supabase
+        .from("league_states")
+        .select("draft_order,picks,scores")
+        .eq("league_id", leagueId)
+        .single<LeagueStateRow>();
+      const latestDraftOrder = data?.draft_order ?? draftOrder;
+      const latestPicks = data?.picks ?? picks;
+
+      if (!latestDraftOrder.length || latestPicks.length >= totalPicks) {
+        setTimer(120);
+        return;
+      }
+
+      if (latestPicks.length !== picks.length) {
+        setDraftOrder(latestDraftOrder);
+        setPicks(latestPicks);
+        setScores(data?.scores ?? scores);
+        setTimer(120);
+        return;
+      }
+
+      const nextPickNumber = latestPicks.length + 1;
+      const nextMemberId = getMemberForPick(latestDraftOrder, nextPickNumber);
+      const draftedIds = new Set(latestPicks.map((pick) => pick.player.id));
+      const currentRoster = latestPicks
+        .filter((pick) => pick.memberId === nextMemberId)
+        .map((pick) => pick.player);
+      const autoPick = selectAutoPick(playerPool, draftedIds, currentRoster);
+
+      if (!autoPick) {
+        setStatus("No valid auto-pick was available.");
+        setTimer(120);
+        return;
+      }
+
+      const nextPicks = [
+        ...latestPicks,
+        {
+          memberId: nextMemberId,
+          pickNumber: nextPickNumber,
+          player: autoPick,
+        },
+      ];
+
+      setPicks(nextPicks);
+      setTimer(120);
+      await saveLeagueState({ picks: nextPicks });
+    } finally {
+      autoPickingRef.current = false;
+    }
   }
 
   async function nudgeScore(playerId: string, delta: number) {
@@ -1445,6 +1531,35 @@ function getMemberForPick(order: string[], pickNumber: number) {
   const roundOrder = roundIndex % 2 === 0 ? order : [...order].reverse();
 
   return roundOrder[pickIndex];
+}
+
+function selectAutoPick(
+  playerPool: DraftPlayer[],
+  draftedIds: Set<string>,
+  currentRoster: DraftPlayer[],
+) {
+  const needsGoalkeeper =
+    currentRoster.length === 5 &&
+    !currentRoster.some((player) => player.position === "GK");
+  const positionRank: Record<DraftPlayer["position"], number> = {
+    GK: needsGoalkeeper ? 0 : 3,
+    FWD: 1,
+    MID: 2,
+    DEF: 4,
+  };
+
+  return playerPool
+    .filter((player) => !draftedIds.has(player.id))
+    .filter((player) => validateDraftSelection(currentRoster, player).valid)
+    .sort((a, b) => {
+      const positionDiff = positionRank[a.position] - positionRank[b.position];
+
+      if (positionDiff !== 0) {
+        return positionDiff;
+      }
+
+      return `${a.team} ${a.name}`.localeCompare(`${b.team} ${b.name}`);
+    })[0];
 }
 
 function formatTimer(seconds: number) {
