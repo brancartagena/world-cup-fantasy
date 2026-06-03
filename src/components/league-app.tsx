@@ -1388,8 +1388,8 @@ function DraftPanel(props: {
     !props.draftComplete && props.currentUserMember?.id === props.currentMember?.id;
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-      <div className="grid gap-4 sm:gap-5">
+    <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr] xl:items-start">
+      <div className="grid content-start gap-4 sm:gap-5">
         {props.draftComplete ? (
           <DraftCompleteBanner members={props.members} rosters={props.rosters} />
         ) : null}
