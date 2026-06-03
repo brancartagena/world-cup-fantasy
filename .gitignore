@@ -23,6 +23,9 @@
 # misc
 .DS_Store
 *.pem
+/work/
+docs/player-import.html
+docs/player-import_files/
 
 # debug
 npm-debug.log*

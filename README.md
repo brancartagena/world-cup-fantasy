@@ -75,3 +75,5 @@ OpenFootball does not need an API key.
 - `docs/supabase-grants.sql`: Data API grants required when automatic table exposure is disabled.
 - `docs/supabase-setup.md`: Supabase environment and database setup notes.
 - `docs/player-import.md`: instructions for importing full World Cup squads into Supabase.
+- `docs/world-cup-2026-players.csv`: extracted 48-team player pool from the uploaded FIFA squad PDF.
+- `docs/world-cup-2026-players.sql`: SQL import file for Supabase.

@@ -2,6 +2,23 @@
 
 The draft screen now reads from Supabase `players` joined to `teams`. If the table is empty, the app falls back to the temporary sample player list.
 
+## Ready-To-Run Files
+
+The uploaded FIFA squad PDF has been converted into:
+
+- `docs/world-cup-2026-players.csv`
+- `docs/world-cup-2026-players.sql`
+
+The extraction produced:
+
+- 48 teams
+- 1,248 players
+- 26 players per team
+
+The easiest path is to run `docs/world-cup-2026-players.sql` in Supabase SQL Editor. It replaces the current `teams` and `players` rows, then inserts the full player pool.
+
+After running it, refresh the app. The Player Pool should show the imported World Cup players instead of the sample list.
+
 ## CSV Format
 
 Use this template:
