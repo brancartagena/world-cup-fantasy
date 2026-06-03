@@ -133,6 +133,12 @@ to authenticated
 using (host_user_id = auth.uid())
 with check (host_user_id = auth.uid());
 
+drop policy if exists "hosts can delete leagues" on public.leagues;
+create policy "hosts can delete leagues"
+on public.leagues for delete
+to authenticated
+using (host_user_id = auth.uid());
+
 drop policy if exists "hosts can add members" on public.league_members;
 create policy "hosts can add members"
 on public.league_members for insert

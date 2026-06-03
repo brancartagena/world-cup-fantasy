@@ -9,7 +9,7 @@ grant select on public.players to anon, authenticated;
 grant select on public.fixtures to anon, authenticated;
 grant select on public.match_events to anon, authenticated;
 
-grant select, insert, update on public.leagues to authenticated;
+grant select, insert, update, delete on public.leagues to authenticated;
 grant select, insert, update, delete on public.league_members to authenticated;
 grant select, insert, update on public.draft_picks to authenticated;
 grant select, insert, update on public.fantasy_scores to authenticated;

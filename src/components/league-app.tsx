@@ -375,6 +375,35 @@ export function LeagueApp() {
     await supabase.from("league_members").delete().eq("id", memberId);
   }
 
+  async function deleteRoom() {
+    if (!isHost || !leagueId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Delete this room for everyone? This removes the league, members, draft picks, and scores.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setStatus("Deleting room...");
+
+    const { error } = await supabase.from("leagues").delete().eq("id", leagueId);
+
+    if (error) {
+      setStatus(error.message);
+      setSaving(false);
+      return;
+    }
+
+    leaveLeague();
+    setStatus("Room deleted.");
+    setSaving(false);
+  }
+
   function leaveLeague() {
     window.localStorage.removeItem(activeLeagueKey);
     setLeagueId("");
@@ -515,11 +544,13 @@ export function LeagueApp() {
         {activeTab === "league" ? (
           <LeaguePanel
             draftOrder={draftOrder}
+            deleteRoom={deleteRoom}
             inviteCode={inviteCode}
             isHost={isHost}
             lockDraftOrder={lockDraftOrder}
             members={members}
             removeMember={removeMember}
+            saving={saving}
           />
         ) : null}
 
@@ -651,12 +682,14 @@ function RoomGate(props: {
 }
 
 function LeaguePanel(props: {
+  deleteRoom: () => void;
   draftOrder: string[];
   inviteCode: string;
   isHost: boolean;
   lockDraftOrder: () => void;
   members: Member[];
   removeMember: (memberId: string) => void;
+  saving: boolean;
 }) {
   return (
     <section className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
@@ -682,6 +715,16 @@ function LeaguePanel(props: {
             <p className="mt-3 text-sm text-black/55">
               Waiting for the host to manage the draft.
             </p>
+          ) : null}
+          {props.isHost ? (
+            <button
+              className="mt-3 w-full border border-red-800/30 bg-white px-5 py-3 font-semibold text-red-800 disabled:opacity-45"
+              disabled={props.saving}
+              onClick={props.deleteRoom}
+              type="button"
+            >
+              Delete Room
+            </button>
           ) : null}
         </Panel>
 
