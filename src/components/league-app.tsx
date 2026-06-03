@@ -9,10 +9,13 @@ import {
 } from "@/lib/draft";
 import { draftRules, scoringRules } from "@/lib/fantasy-config";
 import { sampleFixtures, samplePlayers } from "@/lib/sample-data";
+import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
   name: string;
+  userId: string;
+  isHost: boolean;
 };
 
 type Pick = {
@@ -21,70 +24,61 @@ type Pick = {
   pickNumber: number;
 };
 
-type Tab = "league" | "draft" | "scores";
-type SavedLeagueState = {
-  draftOrder: string[];
-  leagueName: string;
-  members: Member[];
-  picks: Pick[];
-  scores: Record<string, number>;
+type LeagueRow = {
+  id: string;
+  name: string;
+  invite_code: string;
+  host_user_id: string;
 };
 
-const storageKey = "world-cup-fantasy-private-league";
+type MemberRow = {
+  id: string;
+  display_name: string;
+  user_id: string;
+  is_host: boolean;
+};
 
-const initialMembers: Member[] = [
-  { id: "host", name: "Host" },
-  { id: "brandon", name: "Brandon" },
-  { id: "alex", name: "Alex" },
-  { id: "mike", name: "Mike" },
-];
+type LeagueStateRow = {
+  draft_order: string[] | null;
+  picks: Pick[] | null;
+  scores: Record<string, number> | null;
+};
+
+type Tab = "league" | "draft" | "scores";
+
+const activeLeagueKey = "world-cup-fantasy-active-league";
 
 export function LeagueApp() {
-  const [leagueName, setLeagueName] = useState(
-    () => readSavedLeagueState().leagueName,
-  );
-  const [members, setMembers] = useState<Member[]>(
-    () => readSavedLeagueState().members,
-  );
-  const [newMember, setNewMember] = useState("");
-  const [draftOrder, setDraftOrder] = useState<string[]>(
-    () => readSavedLeagueState().draftOrder,
-  );
-  const [picks, setPicks] = useState<Pick[]>(
-    () => readSavedLeagueState().picks,
-  );
+  const [leagueId, setLeagueId] = useState("");
+  const [leagueName, setLeagueName] = useState("2026 World Cup Crew");
+  const [inviteCode, setInviteCode] = useState("");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [displayName, setDisplayName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [draftOrder, setDraftOrder] = useState<string[]>([]);
+  const [picks, setPicks] = useState<Pick[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("league");
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState("ALL");
   const [timer, setTimer] = useState(120);
-  const [scores, setScores] = useState<Record<string, number>>(
-    () => readSavedLeagueState().scores,
-  );
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [userId, setUserId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("Connecting to Supabase...");
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setTimer((current) => (current > 0 && draftOrder.length ? current - 1 : current));
+      setTimer((current) =>
+        current > 0 && draftOrder.length ? current - 1 : current,
+      );
     }, 1000);
 
     return () => window.clearInterval(interval);
   }, [draftOrder.length]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const payload: SavedLeagueState = {
-      draftOrder,
-      leagueName,
-      members,
-      picks,
-      scores,
-    };
-
-    window.localStorage.setItem(storageKey, JSON.stringify(payload));
-  }, [draftOrder, leagueName, members, picks, scores]);
-
+  const currentUserMember = members.find((member) => member.userId === userId);
+  const isHost = currentUserMember?.isHost ?? false;
   const roundCount = 6;
   const totalPicks = members.length * roundCount;
   const currentPickNumber = picks.length + 1;
@@ -125,49 +119,282 @@ export function LeagueApp() {
     }))
     .sort((a, b) => b.points - a.points);
 
-  function addMember() {
-    const trimmed = newMember.trim();
+  async function createLeague() {
+    const trimmedName = leagueName.trim();
+    const trimmedDisplayName = displayName.trim() || "Host";
+    const code = createInviteCode();
 
-    if (!trimmed || members.length >= 10) {
+    setSaving(true);
+    setStatus("Creating league...");
+
+    const { data: league, error: leagueError } = await supabase
+      .from("leagues")
+      .insert({
+        name: trimmedName || "2026 World Cup Crew",
+        invite_code: code,
+        host_user_id: userId,
+      })
+      .select("id,name,invite_code,host_user_id")
+      .single<LeagueRow>();
+
+    if (leagueError || !league) {
+      setStatus(leagueError?.message ?? "Could not create league.");
+      setSaving(false);
       return;
     }
 
-    setMembers((current) => [
-      ...current,
-      { id: `${trimmed.toLowerCase().replaceAll(" ", "-")}-${Date.now()}`, name: trimmed },
+    const { error: memberError } = await supabase.from("league_members").insert({
+      league_id: league.id,
+      user_id: userId,
+      display_name: trimmedDisplayName,
+      is_host: true,
+    });
+
+    const { error: stateError } = await supabase.from("league_states").insert({
+      league_id: league.id,
+      draft_order: [],
+      picks: [],
+      scores: {},
+    });
+
+    if (memberError || stateError) {
+      setStatus(memberError?.message ?? stateError?.message ?? "Setup failed.");
+      setSaving(false);
+      return;
+    }
+
+    window.localStorage.setItem(activeLeagueKey, league.id);
+    setLeagueId(league.id);
+    setLeagueName(league.name);
+    setInviteCode(league.invite_code);
+    setMembers([
+      {
+        id: userId,
+        isHost: true,
+        name: trimmedDisplayName,
+        userId,
+      },
     ]);
-    setNewMember("");
+    setDraftOrder([]);
+    setPicks([]);
+    setScores({});
+    setStatus("League created. Share the invite code.");
+    setSaving(false);
   }
 
-  function lockDraftOrder() {
-    setDraftOrder(getDraftOrder(members.map((member) => member.id), leagueName));
+  async function joinLeague() {
+    const trimmedName = displayName.trim();
+
+    if (!trimmedName || !joinCode.trim()) {
+      setStatus("Enter your name and invite code.");
+      return;
+    }
+
+    setSaving(true);
+    setStatus("Joining league...");
+
+    const { data, error } = await supabase.rpc("join_league", {
+      join_code: joinCode,
+      member_name: trimmedName,
+    });
+
+    if (error || !data) {
+      setStatus(error?.message ?? "Could not join league.");
+      setSaving(false);
+      return;
+    }
+
+    window.localStorage.setItem(activeLeagueKey, data);
+    await loadLeague(data);
+    setStatus("Joined league.");
+    setSaving(false);
+  }
+
+  async function loadLeague(targetLeagueId: string) {
+    const { data: league } = await supabase
+      .from("leagues")
+      .select("id,name,invite_code,host_user_id")
+      .eq("id", targetLeagueId)
+      .single<LeagueRow>();
+
+    if (!league) {
+      window.localStorage.removeItem(activeLeagueKey);
+      return;
+    }
+
+    setLeagueId(league.id);
+    setLeagueName(league.name);
+    setInviteCode(league.invite_code);
+    await loadMembers(league.id);
+    await loadLeagueState(league.id);
+  }
+
+  async function loadMembers(targetLeagueId: string) {
+    const { data } = await supabase
+      .from("league_members")
+      .select("id,display_name,user_id,is_host")
+      .eq("league_id", targetLeagueId)
+      .order("joined_at", { ascending: true })
+      .returns<MemberRow[]>();
+
+    if (data) {
+      setMembers(
+        data.map((member) => ({
+          id: member.id,
+          isHost: member.is_host,
+          name: member.display_name,
+          userId: member.user_id,
+        })),
+      );
+    }
+  }
+
+  async function loadLeagueState(targetLeagueId: string) {
+    const { data } = await supabase
+      .from("league_states")
+      .select("draft_order,picks,scores")
+      .eq("league_id", targetLeagueId)
+      .single<LeagueStateRow>();
+
+    if (data) {
+      setDraftOrder(data.draft_order ?? []);
+      setPicks(data.picks ?? []);
+      setScores(data.scores ?? {});
+    }
+  }
+
+  useEffect(() => {
+    async function boot() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const activeSession =
+        session ?? (await supabase.auth.signInAnonymously()).data.session;
+
+      if (!activeSession?.user) {
+        setStatus("Could not start anonymous Supabase session.");
+        setLoading(false);
+        return;
+      }
+
+      setUserId(activeSession.user.id);
+
+      const savedLeagueId = window.localStorage.getItem(activeLeagueKey);
+      if (savedLeagueId) {
+        await loadLeague(savedLeagueId);
+      }
+
+      setStatus("");
+      setLoading(false);
+    }
+
+    void boot();
+    // Runs once on app start to restore the anonymous session and active room.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!leagueId) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`league-room-${leagueId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "league_members",
+          filter: `league_id=eq.${leagueId}`,
+        },
+        () => {
+          void loadMembers(leagueId);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "league_states",
+          filter: `league_id=eq.${leagueId}`,
+        },
+        () => {
+          void loadLeagueState(leagueId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [leagueId]);
+
+  async function saveLeagueState(nextState: {
+    draftOrder?: string[];
+    picks?: Pick[];
+    scores?: Record<string, number>;
+  }) {
+    if (!leagueId) {
+      return;
+    }
+
+    await supabase
+      .from("league_states")
+      .update({
+        draft_order: nextState.draftOrder ?? draftOrder,
+        picks: nextState.picks ?? picks,
+        scores: nextState.scores ?? scores,
+      })
+      .eq("league_id", leagueId);
+  }
+
+  async function lockDraftOrder() {
+    const nextDraftOrder = getDraftOrder(
+      members.map((member) => member.id),
+      `${leagueId}:${leagueName}`,
+    );
+
+    setDraftOrder(nextDraftOrder);
     setPicks([]);
     setTimer(120);
     setActiveTab("draft");
+    await saveLeagueState({ draftOrder: nextDraftOrder, picks: [] });
+    await supabase
+      .from("leagues")
+      .update({ draft_order_locked_at: new Date().toISOString() })
+      .eq("id", leagueId);
   }
 
-  function removeMember(memberId: string) {
-    if (draftOrder.length || memberId === "host") {
+  async function removeMember(memberId: string) {
+    if (!isHost || draftOrder.length) {
       return;
     }
 
-    setMembers((current) => current.filter((member) => member.id !== memberId));
+    await supabase.from("league_members").delete().eq("id", memberId);
   }
 
-  function resetLeague() {
-    setLeagueName("2026 World Cup Crew");
-    setMembers(initialMembers);
-    setNewMember("");
+  function leaveLeague() {
+    window.localStorage.removeItem(activeLeagueKey);
+    setLeagueId("");
+    setInviteCode("");
+    setMembers([]);
     setDraftOrder([]);
     setPicks([]);
     setScores({});
     setTimer(120);
     setActiveTab("league");
-    window.localStorage.removeItem(storageKey);
+    setStatus("");
   }
 
-  function draftPlayer(player: DraftPlayer) {
+  async function draftPlayer(player: DraftPlayer) {
     if (!currentMemberId) {
+      return;
+    }
+
+    if (!isHost && currentUserMember?.id !== currentMemberId) {
+      window.alert("It is not your pick.");
       return;
     }
 
@@ -179,18 +406,50 @@ export function LeagueApp() {
       return;
     }
 
-    setPicks((current) => [
-      ...current,
+    const nextPicks = [
+      ...picks,
       { memberId: currentMemberId, player, pickNumber: currentPickNumber },
-    ]);
+    ];
+
+    setPicks(nextPicks);
     setTimer(120);
+    await saveLeagueState({ picks: nextPicks });
   }
 
-  function nudgeScore(playerId: string, delta: number) {
-    setScores((current) => ({
-      ...current,
-      [playerId]: Math.max(-10, (current[playerId] ?? 0) + delta),
-    }));
+  async function nudgeScore(playerId: string, delta: number) {
+    if (!isHost) {
+      window.alert("Only the host can adjust scores.");
+      return;
+    }
+
+    const nextScores = {
+      ...scores,
+      [playerId]: Math.max(-10, (scores[playerId] ?? 0) + delta),
+    };
+
+    setScores(nextScores);
+    await saveLeagueState({ scores: nextScores });
+  }
+
+  if (loading) {
+    return <LoadingScreen status={status} />;
+  }
+
+  if (!leagueId) {
+    return (
+      <RoomGate
+        createLeague={createLeague}
+        displayName={displayName}
+        joinCode={joinCode}
+        joinLeague={joinLeague}
+        leagueName={leagueName}
+        saving={saving}
+        setDisplayName={setDisplayName}
+        setJoinCode={setJoinCode}
+        setLeagueName={setLeagueName}
+        status={status}
+      />
+    );
   }
 
   return (
@@ -205,6 +464,9 @@ export function LeagueApp() {
               <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">
                 {leagueName}
               </h1>
+              <p className="mt-2 text-sm text-white/70">
+                Invite code <span className="font-semibold text-white">{inviteCode}</span>
+              </p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center text-sm">
               <Stat label="Members" value={`${members.length}/10`} />
@@ -213,7 +475,7 @@ export function LeagueApp() {
             </div>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto">
+          <div className="flex flex-wrap gap-2">
             {[
               ["league", "League"],
               ["draft", "Draft"],
@@ -232,23 +494,32 @@ export function LeagueApp() {
                 {label}
               </button>
             ))}
+            <button
+              className="border border-white/20 px-4 py-2 text-sm font-semibold text-white/78"
+              onClick={leaveLeague}
+              type="button"
+            >
+              Leave
+            </button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:px-8">
+        {status ? (
+          <div className="rounded border border-black/10 bg-white px-4 py-3 text-sm">
+            {status}
+          </div>
+        ) : null}
+
         {activeTab === "league" ? (
           <LeaguePanel
-            addMember={addMember}
             draftOrder={draftOrder}
-            leagueName={leagueName}
+            inviteCode={inviteCode}
+            isHost={isHost}
             lockDraftOrder={lockDraftOrder}
             members={members}
-            newMember={newMember}
             removeMember={removeMember}
-            resetLeague={resetLeague}
-            setLeagueName={setLeagueName}
-            setNewMember={setNewMember}
           />
         ) : null}
 
@@ -256,8 +527,10 @@ export function LeagueApp() {
           <DraftPanel
             availablePlayers={availablePlayers}
             currentMember={currentMember}
+            currentUserMember={currentUserMember}
             draftOrder={draftOrder}
             draftPlayer={draftPlayer}
+            isHost={isHost}
             members={members}
             picks={picks}
             position={position}
@@ -271,6 +544,7 @@ export function LeagueApp() {
 
         {activeTab === "scores" ? (
           <ScoresPanel
+            isHost={isHost}
             leaderboard={leaderboard}
             members={members}
             nudgeScore={nudgeScore}
@@ -283,66 +557,132 @@ export function LeagueApp() {
   );
 }
 
-function LeaguePanel(props: {
-  addMember: () => void;
-  draftOrder: string[];
+function RoomGate(props: {
+  createLeague: () => void;
+  displayName: string;
+  joinCode: string;
+  joinLeague: () => void;
   leagueName: string;
-  lockDraftOrder: () => void;
-  members: Member[];
-  newMember: string;
-  removeMember: (memberId: string) => void;
-  resetLeague: () => void;
+  saving: boolean;
+  setDisplayName: (value: string) => void;
+  setJoinCode: (value: string) => void;
   setLeagueName: (value: string) => void;
-  setNewMember: (value: string) => void;
+  status: string;
 }) {
   return (
-    <section className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-      <div className="grid gap-5">
-        <Panel title="Host Setup">
+    <main className="min-h-screen bg-[#f3f0e8] text-[#141414]">
+      <section className="bg-[#103d35] px-4 py-10 text-white">
+        <div className="mx-auto max-w-5xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#f4c84b]">
+            Private World Cup fantasy
+          </p>
+          <h1 className="mt-3 max-w-3xl text-4xl font-semibold sm:text-5xl">
+            Create a room or join your friends.
+          </h1>
+        </div>
+      </section>
+
+      <section className="mx-auto grid max-w-5xl gap-5 px-4 py-5 md:grid-cols-2">
+        <Panel title="Create Room">
           <label className="grid gap-2 text-sm font-semibold">
+            Your name
+            <input
+              className="border border-black/15 px-3 py-3 font-normal"
+              onChange={(event) => props.setDisplayName(event.target.value)}
+              placeholder="Host name"
+              value={props.displayName}
+            />
+          </label>
+          <label className="mt-4 grid gap-2 text-sm font-semibold">
             League name
             <input
-              className="border border-black/15 bg-white px-3 py-3 font-normal outline-none focus:border-[#103d35]"
+              className="border border-black/15 px-3 py-3 font-normal"
               onChange={(event) => props.setLeagueName(event.target.value)}
               value={props.leagueName}
             />
           </label>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-            <input
-              className="border border-black/15 bg-white px-3 py-3 outline-none focus:border-[#103d35]"
-              onChange={(event) => props.setNewMember(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") props.addMember();
-              }}
-              placeholder="Friend name"
-              value={props.newMember}
-            />
-            <button
-              className="bg-[#103d35] px-5 py-3 font-semibold text-white disabled:bg-black/20"
-              disabled={props.members.length >= 10}
-              onClick={props.addMember}
-              type="button"
-            >
-              Add
-            </button>
-          </div>
-
           <button
-            className="mt-4 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black"
+            className="mt-4 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
+            disabled={props.saving}
+            onClick={props.createLeague}
+            type="button"
+          >
+            Create Room
+          </button>
+        </Panel>
+
+        <Panel title="Join Room">
+          <label className="grid gap-2 text-sm font-semibold">
+            Your name
+            <input
+              className="border border-black/15 px-3 py-3 font-normal"
+              onChange={(event) => props.setDisplayName(event.target.value)}
+              placeholder="Your name"
+              value={props.displayName}
+            />
+          </label>
+          <label className="mt-4 grid gap-2 text-sm font-semibold">
+            Invite code
+            <input
+              className="border border-black/15 px-3 py-3 font-normal uppercase"
+              onChange={(event) => props.setJoinCode(event.target.value)}
+              placeholder="WC2026"
+              value={props.joinCode}
+            />
+          </label>
+          <button
+            className="mt-4 w-full bg-[#103d35] px-5 py-3 font-semibold text-white disabled:bg-black/15"
+            disabled={props.saving}
+            onClick={props.joinLeague}
+            type="button"
+          >
+            Join Room
+          </button>
+        </Panel>
+
+        {props.status ? (
+          <div className="rounded border border-black/10 bg-white px-4 py-3 text-sm md:col-span-2">
+            {props.status}
+          </div>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function LeaguePanel(props: {
+  draftOrder: string[];
+  inviteCode: string;
+  isHost: boolean;
+  lockDraftOrder: () => void;
+  members: Member[];
+  removeMember: (memberId: string) => void;
+}) {
+  return (
+    <section className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid gap-5">
+        <Panel title="Room">
+          <div className="border border-black/10 bg-[#f3f0e8] p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50">
+              Invite code
+            </div>
+            <div className="mt-2 text-4xl font-semibold tracking-[0.12em]">
+              {props.inviteCode}
+            </div>
+          </div>
+          <button
+            className="mt-4 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
+            disabled={!props.isHost || props.members.length < 2}
             onClick={props.lockDraftOrder}
             type="button"
           >
             Lock Draft Order
           </button>
-
-          <button
-            className="mt-3 w-full border border-black/15 bg-white px-5 py-3 font-semibold text-black"
-            onClick={props.resetLeague}
-            type="button"
-          >
-            Reset League
-          </button>
+          {!props.isHost ? (
+            <p className="mt-3 text-sm text-black/55">
+              Waiting for the host to manage the draft.
+            </p>
+          ) : null}
         </Panel>
 
         <Panel title="Rules">
@@ -354,7 +694,7 @@ function LeaguePanel(props: {
         </Panel>
       </div>
 
-      <Panel title="Invited Players">
+      <Panel title="League Members">
         <div className="grid gap-2">
           {props.members.map((member, index) => (
             <div
@@ -364,12 +704,15 @@ function LeaguePanel(props: {
               <span className="grid size-8 place-items-center bg-[#103d35] text-sm font-semibold text-white">
                 {index + 1}
               </span>
-              <span className="font-semibold">{member.name}</span>
-              {member.id === "host" || props.draftOrder.length ? (
-                <span className="text-xs uppercase tracking-[0.14em] text-black/45">
-                  {props.draftOrder.includes(member.id) ? "Order set" : "Waiting"}
-                </span>
-              ) : (
+              <span>
+                <span className="block font-semibold">{member.name}</span>
+                {member.isHost ? (
+                  <span className="text-xs uppercase tracking-[0.14em] text-black/45">
+                    Host
+                  </span>
+                ) : null}
+              </span>
+              {props.isHost && !member.isHost && !props.draftOrder.length ? (
                 <button
                   className="border border-black/15 px-3 py-2 text-xs font-semibold"
                   onClick={() => props.removeMember(member.id)}
@@ -377,6 +720,10 @@ function LeaguePanel(props: {
                 >
                   Remove
                 </button>
+              ) : (
+                <span className="text-xs uppercase tracking-[0.14em] text-black/45">
+                  {props.draftOrder.includes(member.id) ? "Order set" : "Joined"}
+                </span>
               )}
             </div>
           ))}
@@ -389,8 +736,10 @@ function LeaguePanel(props: {
 function DraftPanel(props: {
   availablePlayers: DraftPlayer[];
   currentMember?: Member;
+  currentUserMember?: Member;
   draftOrder: string[];
   draftPlayer: (player: DraftPlayer) => void;
+  isHost: boolean;
   members: Member[];
   picks: Pick[];
   position: string;
@@ -404,12 +753,14 @@ function DraftPanel(props: {
     return (
       <Panel title="Draft Not Started">
         <p className="text-sm leading-6 text-black/65">
-          Go to League and lock the draft order. The host controls this because
-          this version is built for one private group of up to 10 people.
+          The host needs to lock the draft order before picks can begin.
         </p>
       </Panel>
     );
   }
+
+  const canPick =
+    props.isHost || props.currentUserMember?.id === props.currentMember?.id;
 
   return (
     <section className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
@@ -435,7 +786,9 @@ function DraftPanel(props: {
                   className="flex items-center justify-between border-b border-black/10 py-2 text-sm"
                   key={memberId}
                 >
-                  <span>{index + 1}. {member?.name}</span>
+                  <span>
+                    {index + 1}. {member?.name}
+                  </span>
                   <span className="text-black/45">
                     {(props.rosters[memberId] ?? []).length}/6
                   </span>
@@ -470,6 +823,11 @@ function DraftPanel(props: {
       </div>
 
       <Panel title="Player Pool">
+        {!canPick ? (
+          <p className="mb-4 text-sm text-black/55">
+            Waiting for {props.currentMember?.name} to pick.
+          </p>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <input
             className="border border-black/15 bg-white px-3 py-3 outline-none focus:border-[#103d35]"
@@ -493,7 +851,8 @@ function DraftPanel(props: {
         <div className="mt-4 grid gap-2">
           {props.availablePlayers.map((player) => (
             <button
-              className="grid grid-cols-[1fr_auto] items-center gap-4 border border-black/10 bg-white p-4 text-left transition hover:border-[#103d35]"
+              className="grid grid-cols-[1fr_auto] items-center gap-4 border border-black/10 bg-white p-4 text-left transition enabled:hover:border-[#103d35] disabled:opacity-45"
+              disabled={!canPick}
               key={player.id}
               onClick={() => props.draftPlayer(player)}
               type="button"
@@ -516,6 +875,7 @@ function DraftPanel(props: {
 }
 
 function ScoresPanel(props: {
+  isHost: boolean;
   leaderboard: Array<Member & { points: number }>;
   members: Member[];
   nudgeScore: (playerId: string, delta: number) => void;
@@ -542,11 +902,10 @@ function ScoresPanel(props: {
       </Panel>
 
       <div className="grid gap-5">
-        <Panel title="Admin Score Adjustments">
+        <Panel title="Host Score Adjustments">
           <p className="mb-4 text-sm leading-6 text-black/62">
-            Until free APIs are connected, the host can adjust player totals
-            here. This is the same place we will show goals, assists, saves,
-            clean sheets, red cards, and team-win points.
+            Free live data will plug into this same score store later. For now,
+            the host can correct points and everyone sees the change live.
           </p>
           <div className="grid gap-2">
             {Object.entries(props.rosters).flatMap(([memberId, roster]) =>
@@ -565,7 +924,8 @@ function ScoresPanel(props: {
                     </span>
                   </span>
                   <button
-                    className="size-9 border border-black/15 bg-white font-semibold"
+                    className="size-9 border border-black/15 bg-white font-semibold disabled:opacity-40"
+                    disabled={!props.isHost}
                     onClick={() => props.nudgeScore(player.id, -1)}
                     type="button"
                   >
@@ -575,7 +935,8 @@ function ScoresPanel(props: {
                     {props.scores[player.id] ?? 0}
                   </span>
                   <button
-                    className="size-9 border border-black/15 bg-white font-semibold"
+                    className="size-9 border border-black/15 bg-white font-semibold disabled:opacity-40"
+                    disabled={!props.isHost}
                     onClick={() => props.nudgeScore(player.id, 1)}
                     type="button"
                   >
@@ -611,6 +972,17 @@ function ScoresPanel(props: {
         </Panel>
       </div>
     </section>
+  );
+}
+
+function LoadingScreen(props: { status: string }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#f3f0e8] px-4 text-[#141414]">
+      <div className="rounded-lg border border-black/10 bg-white p-6 shadow-sm">
+        <h1 className="text-xl font-semibold">World Cup Fantasy</h1>
+        <p className="mt-2 text-sm text-black/60">{props.status}</p>
+      </div>
+    </main>
   );
 }
 
@@ -658,23 +1030,13 @@ function formatTimer(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function readSavedLeagueState(): SavedLeagueState {
-  const fallback = {
-    draftOrder: [],
-    leagueName: "2026 World Cup Crew",
-    members: initialMembers,
-    picks: [],
-    scores: {},
-  };
+function createInviteCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
 
-  if (typeof window === "undefined") {
-    return fallback;
+  for (let index = 0; index < 6; index += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
 
-  try {
-    const saved = window.localStorage.getItem(storageKey);
-    return saved ? (JSON.parse(saved) as SavedLeagueState) : fallback;
-  } catch {
-    return fallback;
-  }
+  return code;
 }

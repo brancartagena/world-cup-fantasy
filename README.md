@@ -70,3 +70,7 @@ OpenFootball does not need an API key.
 
 - `docs/data-model.md`: table plan and source priority.
 - `docs/supabase-schema.sql`: first-pass SQL schema for Supabase.
+- `docs/supabase-rls.sql`: invite-code and Row Level Security setup.
+- `docs/supabase-league-state.sql`: realtime room state table for the MVP.
+- `docs/supabase-grants.sql`: Data API grants required when automatic table exposure is disabled.
+- `docs/supabase-setup.md`: Supabase environment and database setup notes.
