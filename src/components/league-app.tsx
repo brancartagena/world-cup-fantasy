@@ -108,6 +108,7 @@ export function LeagueApp() {
   const autoPickingRef = useRef(false);
   const previousDraftOrderCount = useRef(0);
   const previousPickCount = useRef(0);
+  const previousTimerWarningPick = useRef(0);
   const soundUnlockedRef = useRef(false);
 
   const currentUserMember = members.find((member) => member.userId === userId);
@@ -184,6 +185,28 @@ export function LeagueApp() {
 
     previousPickCount.current = picks.length;
   }, [picks.length, soundEnabled, totalPicks]);
+
+  useEffect(() => {
+    if (
+      timer === 10 &&
+      draftOrder.length &&
+      !draftComplete &&
+      previousTimerWarningPick.current !== currentPickNumber
+    ) {
+      playAppSound("timer-warning", soundEnabled, soundUnlockedRef);
+      previousTimerWarningPick.current = currentPickNumber;
+    }
+
+    if (timer > 10) {
+      previousTimerWarningPick.current = 0;
+    }
+  }, [
+    currentPickNumber,
+    draftComplete,
+    draftOrder.length,
+    soundEnabled,
+    timer,
+  ]);
 
   const rosters = useMemo(() => {
     return Object.fromEntries(
@@ -913,6 +936,7 @@ export function LeagueApp() {
           <DraftPanel
             availablePlayers={availablePlayers}
             currentMember={currentMember}
+            currentMemberId={currentMemberId}
             currentUserMember={currentUserMember}
             draftOrder={draftOrder}
             draftPlayer={draftPlayer}
@@ -926,6 +950,7 @@ export function LeagueApp() {
             rosters={rosters}
             setPosition={setPosition}
             setQuery={setQuery}
+            timer={timer}
             totalPicks={totalPicks}
           />
         ) : null}
@@ -1332,6 +1357,7 @@ function TeamLogo(props: { logo: string; name: string }) {
 function DraftPanel(props: {
   availablePlayers: DraftPlayer[];
   currentMember?: Member;
+  currentMemberId: string | null;
   currentUserMember?: Member;
   draftOrder: string[];
   draftPlayer: (player: DraftPlayer) => void;
@@ -1345,6 +1371,7 @@ function DraftPanel(props: {
   rosters: Record<string, DraftPlayer[]>;
   setPosition: (value: string) => void;
   setQuery: (value: string) => void;
+  timer: number;
   totalPicks: number;
 }) {
   if (!props.draftOrder.length) {
@@ -1363,6 +1390,10 @@ function DraftPanel(props: {
   return (
     <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
       <div className="grid gap-4 sm:gap-5">
+        {props.draftComplete ? (
+          <DraftCompleteBanner members={props.members} rosters={props.rosters} />
+        ) : null}
+
         <Panel title="On The Clock">
           <div className="bg-[#103d35] p-4 text-white sm:p-5">
             <p className="text-xs uppercase tracking-[0.18em] text-[#f4c84b]">
@@ -1376,20 +1407,52 @@ function DraftPanel(props: {
                 ? "All rosters are complete."
                 : `Pick ${props.picks.length + 1} of ${props.totalPicks}`}
             </p>
+            {!props.draftComplete ? (
+              <div
+                className={`mt-4 inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold ${
+                  props.timer <= 10 ? "bg-[#f4c84b] text-black" : "bg-white/10"
+                }`}
+              >
+                <span>{formatTimer(props.timer)}</span>
+                <span className="text-xs uppercase tracking-[0.14em]">
+                  {props.timer <= 10 ? "Pick soon" : "On clock"}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 grid gap-2">
             {props.draftOrder.map((memberId, index) => {
               const member = props.members.find((item) => item.id === memberId);
+              const isCurrentTurn =
+                !props.draftComplete && props.currentMemberId === memberId;
               return (
                 <div
-                  className="flex items-center justify-between border-b border-black/10 py-2 text-sm"
+                  className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 border px-3 py-2 text-sm ${
+                    isCurrentTurn
+                      ? "border-[#f4c84b] bg-[#fff8dc]"
+                      : "border-black/10 bg-white"
+                  }`}
                   key={memberId}
                 >
-                  <span>
-                    {index + 1}. {member?.name}
+                  <span
+                    className={`grid size-7 place-items-center text-xs font-semibold ${
+                      isCurrentTurn ? "bg-[#f4c84b] text-black" : "bg-[#ede7d8]"
+                    }`}
+                  >
+                    {index + 1}
                   </span>
-                  <span className="text-black/45">
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">
+                      {member?.name}
+                    </span>
+                    {isCurrentTurn ? (
+                      <span className="text-xs uppercase tracking-[0.14em] text-[#846400]">
+                        On clock
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="text-xs font-semibold text-black/50">
                     {(props.rosters[memberId] ?? []).length}/6
                   </span>
                 </div>
@@ -1401,22 +1464,12 @@ function DraftPanel(props: {
         <Panel title="Rosters">
           <div className="grid gap-3">
             {props.members.map((member) => (
-              <div className="border border-black/10 p-3" key={member.id}>
-                <div className="flex justify-between gap-3 text-sm font-semibold">
-                  <span>{member.name}</span>
-                  <span>{(props.rosters[member.id] ?? []).length}/6</span>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {(props.rosters[member.id] ?? []).map((player) => (
-                    <span
-                      className="bg-[#ede7d8] px-2 py-1 text-xs"
-                      key={player.id}
-                    >
-                      {player.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <RosterCard
+                isCurrentTurn={!props.draftComplete && props.currentMemberId === member.id}
+                key={member.id}
+                member={member}
+                roster={props.rosters[member.id] ?? []}
+              />
             ))}
           </div>
         </Panel>
@@ -1479,6 +1532,95 @@ function DraftPanel(props: {
         </div>
       </Panel>
     </section>
+  );
+}
+
+function DraftCompleteBanner(props: {
+  members: Member[];
+  rosters: Record<string, DraftPlayer[]>;
+}) {
+  return (
+    <div className="border border-[#103d35]/20 bg-[#103d35] p-4 text-white shadow-sm sm:p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#f4c84b]">
+        Draft complete
+      </p>
+      <h2 className="mt-2 text-2xl font-semibold leading-tight">
+        Rosters are locked
+      </h2>
+      <p className="mt-2 text-sm text-white/72">
+        {props.members.length} squads are ready for the group stage.
+      </p>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {props.members.map((member) => (
+          <div
+            className="grid grid-cols-[1fr_auto] items-center gap-3 border border-white/15 px-3 py-2"
+            key={member.id}
+          >
+            <span className="truncate text-sm font-semibold">{member.name}</span>
+            <span className="text-xs uppercase tracking-[0.14em] text-white/58">
+              {(props.rosters[member.id] ?? []).length}/6
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RosterCard(props: {
+  isCurrentTurn: boolean;
+  member: Member;
+  roster: DraftPlayer[];
+}) {
+  const slots = Array.from({ length: 6 }, (_, index) => props.roster[index]);
+
+  return (
+    <div
+      className={`border p-3 ${
+        props.isCurrentTurn ? "border-[#f4c84b] bg-[#fff8dc]" : "border-black/10"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3 text-sm font-semibold">
+        <span className="min-w-0 truncate">{props.member.name}</span>
+        <span className="text-xs uppercase tracking-[0.14em] text-black/45">
+          {props.isCurrentTurn ? "On clock" : `${props.roster.length}/6`}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {slots.map((player, index) => (
+          <RosterSlot index={index} key={`${props.member.id}-${index}`} player={player} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RosterSlot(props: { index: number; player?: DraftPlayer }) {
+  if (!props.player) {
+    return (
+      <div className="grid min-h-10 grid-cols-[auto_1fr_auto] items-center gap-2 border border-dashed border-black/15 bg-white/55 px-2 py-2 text-xs text-black/38">
+        <span className="grid size-6 place-items-center bg-[#ede7d8] font-semibold">
+          {props.index + 1}
+        </span>
+        <span>Empty slot</span>
+        <span>--</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid min-h-10 grid-cols-[auto_1fr_auto] items-center gap-2 border border-black/10 bg-white px-2 py-2 text-xs">
+      <span className="grid size-6 place-items-center bg-[#103d35] font-semibold text-white">
+        {props.index + 1}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate font-semibold">{props.player.name}</span>
+        <span className="text-black/45">{props.player.team}</span>
+      </span>
+      <span className="bg-[#ede7d8] px-2 py-1 font-semibold">
+        {props.player.position}
+      </span>
+    </div>
   );
 }
 
@@ -1698,7 +1840,7 @@ function unlockAppSound(unlockedRef: React.MutableRefObject<boolean>) {
 }
 
 function playAppSound(
-  sound: "draft-lock" | "draft-complete" | "pick-made",
+  sound: "draft-lock" | "draft-complete" | "pick-made" | "timer-warning",
   enabled: boolean,
   unlockedRef: React.MutableRefObject<boolean>,
 ) {
@@ -1721,7 +1863,7 @@ function playAppSound(
     const startsAt = audioContext.currentTime + note.start;
     const endsAt = startsAt + note.duration;
 
-    oscillator.type = sound === "pick-made" ? "sine" : "triangle";
+    oscillator.type = sound === "timer-warning" ? "square" : sound === "pick-made" ? "sine" : "triangle";
     oscillator.frequency.setValueAtTime(note.frequency, startsAt);
     gain.gain.setValueAtTime(0.0001, startsAt);
     gain.gain.exponentialRampToValueAtTime(0.11, startsAt + 0.015);
@@ -1739,7 +1881,9 @@ function playAppSound(
   }, sound === "draft-complete" ? 1150 : 650);
 }
 
-function getSoundNotes(sound: "draft-lock" | "draft-complete" | "pick-made") {
+function getSoundNotes(
+  sound: "draft-lock" | "draft-complete" | "pick-made" | "timer-warning",
+) {
   if (sound === "draft-lock") {
     return [
       { frequency: 392, start: 0, duration: 0.11 },
@@ -1755,6 +1899,14 @@ function getSoundNotes(sound: "draft-lock" | "draft-complete" | "pick-made") {
       { frequency: 783.99, start: 0.18, duration: 0.12 },
       { frequency: 1046.5, start: 0.32, duration: 0.2 },
       { frequency: 1318.51, start: 0.5, duration: 0.25 },
+    ];
+  }
+
+  if (sound === "timer-warning") {
+    return [
+      { frequency: 440, start: 0, duration: 0.06 },
+      { frequency: 440, start: 0.13, duration: 0.06 },
+      { frequency: 587.33, start: 0.26, duration: 0.08 },
     ];
   }
 
