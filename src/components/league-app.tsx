@@ -51,6 +51,22 @@ type LeagueStateRow = {
   scores: Record<string, number> | null;
 };
 
+type WorldCupMatch = {
+  awayGoals: number | null;
+  awayTeam: string;
+  awayTeamLogo: string;
+  date: string;
+  elapsed: number | null;
+  fixtureId: number | string;
+  homeGoals: number | null;
+  homeTeam: string;
+  homeTeamLogo: string;
+  round: string;
+  status: string;
+  statusShort: string;
+  venue: string;
+};
+
 type Tab = "league" | "draft" | "scores";
 
 const activeLeagueKey = "world-cup-fantasy-active-league";
@@ -76,6 +92,11 @@ export function LeagueApp() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("Connecting to Supabase...");
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const [matches, setMatches] = useState<WorldCupMatch[]>([]);
+  const [liveMatches, setLiveMatches] = useState<WorldCupMatch[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [matchesError, setMatchesError] = useState("");
+  const [matchesUpdatedAt, setMatchesUpdatedAt] = useState("");
   const previousDraftStarted = useRef(false);
 
   const currentUserMember = members.find((member) => member.userId === userId);
@@ -319,6 +340,35 @@ export function LeagueApp() {
     );
   }
 
+  async function loadWorldCupMatches() {
+    setMatchesLoading((current) => current || !matches.length);
+
+    try {
+      const response = await fetch("/api/world-cup/matches");
+      const payload = (await response.json()) as {
+        error?: string;
+        live?: WorldCupMatch[];
+        refreshedAt?: string;
+        schedule?: WorldCupMatch[];
+      };
+
+      setLiveMatches(payload.live ?? []);
+      setMatches(payload.schedule ?? []);
+      setMatchesUpdatedAt(payload.refreshedAt ?? "");
+      setMatchesError(
+        payload.error
+          ? payload.error
+          : response.ok
+            ? ""
+            : "Could not load World Cup match data.",
+      );
+    } catch {
+      setMatchesError("Could not load World Cup match data.");
+    } finally {
+      setMatchesLoading(false);
+    }
+  }
+
   useEffect(() => {
     async function boot() {
       const {
@@ -402,6 +452,26 @@ export function LeagueApp() {
     // Polling is a fallback for missed Realtime events on mobile/local dev.
   }, [leagueId]);
 
+  useEffect(() => {
+    if (!leagueId) {
+      return;
+    }
+
+    const initialRefresh = window.setTimeout(() => {
+      void loadWorldCupMatches();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void loadWorldCupMatches();
+    }, 60_000);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+    // API-Football data is routed through Next.js so the key stays private.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueId]);
+
   async function saveLeagueState(nextState: {
     draftOrder?: string[];
     picks?: Pick[];
@@ -470,12 +540,39 @@ export function LeagueApp() {
       return;
     }
 
-    leaveLeague();
+    clearActiveLeague();
     setStatus("Room deleted.");
     setSaving(false);
   }
 
-  function leaveLeague() {
+  async function leaveLeague() {
+    if (!leagueId) {
+      clearActiveLeague();
+      return;
+    }
+
+    if (currentUserMember && !currentUserMember.isHost) {
+      setSaving(true);
+      setStatus("Leaving room...");
+
+      const { error } = await supabase
+        .from("league_members")
+        .delete()
+        .eq("id", currentUserMember.id)
+        .eq("user_id", userId);
+
+      if (error) {
+        setStatus(error.message);
+        setSaving(false);
+        return;
+      }
+    }
+
+    clearActiveLeague();
+    setSaving(false);
+  }
+
+  function clearActiveLeague() {
     window.localStorage.removeItem(activeLeagueKey);
     setLeagueId("");
     setInviteCode("");
@@ -483,6 +580,10 @@ export function LeagueApp() {
     setDraftOrder([]);
     setPicks([]);
     setScores({});
+    setMatches([]);
+    setLiveMatches([]);
+    setMatchesError("");
+    setMatchesUpdatedAt("");
     setTimer(120);
     setActiveTab("league");
     setStatus("");
@@ -644,6 +745,11 @@ export function LeagueApp() {
             inviteCode={inviteCode}
             isHost={isHost}
             lockDraftOrder={lockDraftOrder}
+            liveMatches={liveMatches}
+            matches={matches}
+            matchesError={matchesError}
+            matchesLoading={matchesLoading}
+            matchesUpdatedAt={matchesUpdatedAt}
             members={members}
             removeMember={removeMember}
             saving={saving}
@@ -785,6 +891,11 @@ function LeaguePanel(props: {
   inviteCode: string;
   isHost: boolean;
   lockDraftOrder: () => void;
+  liveMatches: WorldCupMatch[];
+  matches: WorldCupMatch[];
+  matchesError: string;
+  matchesLoading: boolean;
+  matchesUpdatedAt: string;
   members: Member[];
   removeMember: (memberId: string) => void;
   saving: boolean;
@@ -835,42 +946,191 @@ function LeaguePanel(props: {
         </Panel>
       </div>
 
-      <Panel title="League Members">
-        <div className="grid gap-2">
-          {props.members.map((member, index) => (
-            <div
-              className="grid grid-cols-[auto_1fr] gap-3 border-b border-black/10 py-3 sm:grid-cols-[auto_1fr_auto] sm:items-center"
-              key={member.id}
-            >
-              <span className="grid size-8 place-items-center bg-[#103d35] text-sm font-semibold text-white">
-                {index + 1}
-              </span>
-              <span>
-                <span className="block font-semibold">{member.name}</span>
-                {member.isHost ? (
-                  <span className="text-xs uppercase tracking-[0.14em] text-black/45">
-                    Host
-                  </span>
-                ) : null}
-              </span>
-              {props.isHost && !member.isHost && !props.draftOrder.length ? (
-                <button
-                  className="col-span-2 min-h-10 border border-black/15 px-3 py-2 text-xs font-semibold sm:col-span-1"
-                  onClick={() => props.removeMember(member.id)}
-                  type="button"
-                >
-                  Remove
-                </button>
-              ) : (
-                <span className="text-xs uppercase tracking-[0.14em] text-black/45">
-                  {props.draftOrder.includes(member.id) ? "Order set" : "Joined"}
+      <div className="grid gap-5">
+        <Panel title="League Members">
+          <div className="grid gap-2">
+            {props.members.map((member, index) => (
+              <div
+                className="grid grid-cols-[auto_1fr] gap-3 border-b border-black/10 py-3 sm:grid-cols-[auto_1fr_auto] sm:items-center"
+                key={member.id}
+              >
+                <span className="grid size-8 place-items-center bg-[#103d35] text-sm font-semibold text-white">
+                  {index + 1}
                 </span>
-              )}
-            </div>
+                <span>
+                  <span className="block font-semibold">{member.name}</span>
+                  {member.isHost ? (
+                    <span className="text-xs uppercase tracking-[0.14em] text-black/45">
+                      Host
+                    </span>
+                  ) : null}
+                </span>
+                {props.isHost && !member.isHost && !props.draftOrder.length ? (
+                  <button
+                    className="col-span-2 min-h-10 border border-black/15 px-3 py-2 text-xs font-semibold sm:col-span-1"
+                    onClick={() => props.removeMember(member.id)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <span className="text-xs uppercase tracking-[0.14em] text-black/45">
+                    {props.draftOrder.includes(member.id)
+                      ? "Order set"
+                      : "Joined"}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <MatchCenter
+          liveMatches={props.liveMatches}
+          matches={props.matches}
+          matchesError={props.matchesError}
+          matchesLoading={props.matchesLoading}
+          matchesUpdatedAt={props.matchesUpdatedAt}
+        />
+      </div>
+    </section>
+  );
+}
+
+function MatchCenter(props: {
+  liveMatches: WorldCupMatch[];
+  matches: WorldCupMatch[];
+  matchesError: string;
+  matchesLoading: boolean;
+  matchesUpdatedAt: string;
+}) {
+  const now = props.matchesUpdatedAt
+    ? new Date(props.matchesUpdatedAt).getTime()
+    : 0;
+  const upcomingMatches = props.matches
+    .filter((match) => new Date(match.date).getTime() >= now)
+    .slice(0, 8);
+  const fallbackMatches = upcomingMatches.length
+    ? upcomingMatches
+    : props.matches.slice(0, 8);
+
+  return (
+    <Panel title="World Cup Match Center">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-[0.14em] text-black/45">
+        <span>
+          {props.matchesLoading ? "Loading API-Football data" : "Schedule and live"}
+        </span>
+        {props.matchesUpdatedAt ? (
+          <span>Updated {formatMatchDate(props.matchesUpdatedAt)}</span>
+        ) : null}
+      </div>
+
+      {props.matchesError ? (
+        <div className="mb-4 border border-amber-500/35 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {props.matchesError}
+        </div>
+      ) : null}
+
+      {props.liveMatches.length ? (
+        <div className="mb-5 grid gap-2">
+          <div className="text-sm font-semibold">Live now</div>
+          {props.liveMatches.map((match) => (
+            <MatchRow highlight key={match.fixtureId} match={match} />
           ))}
         </div>
-      </Panel>
-    </section>
+      ) : (
+        <div className="mb-5 border border-black/10 bg-[#f3f0e8] px-3 py-2 text-sm text-black/62">
+          No World Cup matches are live right now.
+        </div>
+      )}
+
+      <div className="grid gap-2">
+        <div className="text-sm font-semibold">Upcoming fixtures</div>
+        {fallbackMatches.length ? (
+          fallbackMatches.map((match) => (
+            <MatchRow key={match.fixtureId} match={match} />
+          ))
+        ) : (
+          <p className="text-sm text-black/55">
+            Fixture data will appear here once API-Football returns the 2026
+            schedule for your plan.
+          </p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function MatchRow(props: { highlight?: boolean; match: WorldCupMatch }) {
+  const { match } = props;
+  const hasScore = match.homeGoals !== null || match.awayGoals !== null;
+
+  return (
+    <div
+      className={`border p-3 ${
+        props.highlight
+          ? "border-[#103d35] bg-[#103d35] text-white"
+          : "border-black/10 bg-white"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-[0.14em]">
+        <span className={props.highlight ? "text-[#f4c84b]" : "text-black/45"}>
+          {match.round}
+        </span>
+        <span className={props.highlight ? "text-white/70" : "text-black/45"}>
+          {match.elapsed ? `${match.elapsed}'` : formatMatchDate(match.date)}
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm sm:text-base">
+        <TeamName logo={match.homeTeamLogo} name={match.homeTeam} />
+        <span
+          className={`px-2 py-1 text-center font-semibold ${
+            props.highlight ? "bg-white/12" : "bg-[#f3f0e8]"
+          }`}
+        >
+          {hasScore ? `${match.homeGoals ?? 0}-${match.awayGoals ?? 0}` : "vs"}
+        </span>
+        <TeamName alignRight logo={match.awayTeamLogo} name={match.awayTeam} />
+      </div>
+      <div
+        className={`mt-2 text-xs ${
+          props.highlight ? "text-white/65" : "text-black/50"
+        }`}
+      >
+        {match.status}
+        {match.venue ? ` - ${match.venue}` : ""}
+      </div>
+    </div>
+  );
+}
+
+function TeamName(props: { alignRight?: boolean; logo: string; name: string }) {
+  return (
+    <span
+      className={`flex min-w-0 items-center gap-2 font-semibold ${
+        props.alignRight ? "justify-end text-right" : ""
+      }`}
+    >
+      {!props.alignRight ? <TeamLogo logo={props.logo} name={props.name} /> : null}
+      <span className="min-w-0 truncate">{props.name}</span>
+      {props.alignRight ? <TeamLogo logo={props.logo} name={props.name} /> : null}
+    </span>
+  );
+}
+
+function TeamLogo(props: { logo: string; name: string }) {
+  if (!props.logo) {
+    return null;
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      alt=""
+      className="size-5 shrink-0 rounded-full bg-white object-contain"
+      src={props.logo}
+      title={props.name}
+    />
   );
 }
 
@@ -1181,6 +1441,19 @@ function formatTimer(seconds: number) {
   const secs = seconds % 60;
 
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatMatchDate(date: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+    }).format(new Date(`${date}T00:00:00`));
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(date));
 }
 
 function createInviteCode() {

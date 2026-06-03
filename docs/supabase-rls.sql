@@ -165,7 +165,7 @@ drop policy if exists "hosts can remove members" on public.league_members;
 create policy "hosts can remove members"
 on public.league_members for delete
 to authenticated
-using (public.is_league_host(league_id));
+using (public.is_league_host(league_id) or user_id = auth.uid());
 
 drop policy if exists "league members can read draft picks" on public.draft_picks;
 create policy "league members can read draft picks"

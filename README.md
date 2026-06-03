@@ -15,7 +15,7 @@ The first build is made for one host and a small friend group of up to 10 people
 ## Data Sources
 
 - OpenFootball: fixtures, groups, dates, kickoff times, venues, and results.
-- API-Football: free-tier live data, lineups, events, player stats, and injuries where available.
+- API-Football: live match data where your plan allows it. The app keeps the key server-side and falls back to OpenFootball for the 2026 schedule if API-Football blocks the season on the free plan.
 - BALLDONTLIE: World Cup rosters, matches, player stats, events, and standings where available.
 - Admin dashboard: final source of truth for fantasy scoring corrections.
 
@@ -45,6 +45,7 @@ OpenFootball does not need an API key.
 - `/`: Private fantasy league app.
 - `/api/data-sources/openfootball`: Fetches and normalizes the 2026 OpenFootball fixture JSON.
 - `/api/data-sources/status`: Checks whether optional free API keys are configured.
+- `/api/world-cup/matches`: Fetches World Cup schedule/live data for the Match Center without exposing API keys to the browser.
 
 ## Next Build Steps
 
