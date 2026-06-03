@@ -66,6 +66,7 @@ export function LeagueApp() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("Connecting to Supabase...");
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -417,6 +418,16 @@ export function LeagueApp() {
     setStatus("");
   }
 
+  async function copyInviteCode() {
+    if (!inviteCode) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(inviteCode);
+    setCopiedInvite(true);
+    window.setTimeout(() => setCopiedInvite(false), 1800);
+  }
+
   async function draftPlayer(player: DraftPlayer) {
     if (!currentMemberId) {
       return;
@@ -484,18 +495,27 @@ export function LeagueApp() {
   return (
     <main className="min-h-screen bg-[#f3f0e8] text-[#141414]">
       <header className="border-b border-black/10 bg-[#103d35] text-white">
-        <div className="mx-auto grid max-w-7xl gap-6 px-4 py-5 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+        <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:gap-6 sm:px-6 sm:py-5 lg:px-8">
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#f4c84b]">
                 Private World Cup fantasy
               </p>
-              <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">
+              <h1 className="mt-2 text-2xl font-semibold leading-tight sm:text-4xl">
                 {leagueName}
               </h1>
-              <p className="mt-2 text-sm text-white/70">
-                Invite code <span className="font-semibold text-white">{inviteCode}</span>
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="rounded border border-white/20 px-3 py-2 font-mono text-sm font-semibold tracking-[0.16em] text-white">
+                  {inviteCode}
+                </span>
+                <button
+                  className="rounded border border-white/25 px-3 py-2 text-xs font-semibold text-white/82"
+                  onClick={copyInviteCode}
+                  type="button"
+                >
+                  {copiedInvite ? "Copied" : "Copy Code"}
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center text-sm">
               <Stat label="Members" value={`${members.length}/10`} />
@@ -504,7 +524,7 @@ export function LeagueApp() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-4 gap-2 sm:flex sm:flex-wrap">
             {[
               ["league", "League"],
               ["draft", "Draft"],
@@ -534,7 +554,7 @@ export function LeagueApp() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:gap-5 sm:px-6 sm:py-5 lg:px-8">
         {status ? (
           <div className="rounded border border-black/10 bg-white px-4 py-3 text-sm">
             {status}
@@ -602,23 +622,23 @@ function RoomGate(props: {
 }) {
   return (
     <main className="min-h-screen bg-[#f3f0e8] text-[#141414]">
-      <section className="bg-[#103d35] px-4 py-10 text-white">
+      <section className="bg-[#103d35] px-4 py-7 text-white sm:py-10">
         <div className="mx-auto max-w-5xl">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#f4c84b]">
             Private World Cup fantasy
           </p>
-          <h1 className="mt-3 max-w-3xl text-4xl font-semibold sm:text-5xl">
+          <h1 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight sm:text-5xl">
             Create a room or join your friends.
           </h1>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-5xl gap-5 px-4 py-5 md:grid-cols-2">
+      <section className="mx-auto grid max-w-5xl gap-4 px-4 py-4 sm:gap-5 sm:py-5 md:grid-cols-2">
         <Panel title="Create Room">
           <label className="grid gap-2 text-sm font-semibold">
             Your name
             <input
-              className="border border-black/15 px-3 py-3 font-normal"
+              className="min-h-12 border border-black/15 px-3 py-3 text-base font-normal"
               onChange={(event) => props.setDisplayName(event.target.value)}
               placeholder="Host name"
               value={props.displayName}
@@ -627,13 +647,13 @@ function RoomGate(props: {
           <label className="mt-4 grid gap-2 text-sm font-semibold">
             League name
             <input
-              className="border border-black/15 px-3 py-3 font-normal"
+              className="min-h-12 border border-black/15 px-3 py-3 text-base font-normal"
               onChange={(event) => props.setLeagueName(event.target.value)}
               value={props.leagueName}
             />
           </label>
           <button
-            className="mt-4 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
+            className="mt-4 min-h-12 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
             disabled={props.saving}
             onClick={props.createLeague}
             type="button"
@@ -646,7 +666,7 @@ function RoomGate(props: {
           <label className="grid gap-2 text-sm font-semibold">
             Your name
             <input
-              className="border border-black/15 px-3 py-3 font-normal"
+              className="min-h-12 border border-black/15 px-3 py-3 text-base font-normal"
               onChange={(event) => props.setDisplayName(event.target.value)}
               placeholder="Your name"
               value={props.displayName}
@@ -655,14 +675,14 @@ function RoomGate(props: {
           <label className="mt-4 grid gap-2 text-sm font-semibold">
             Invite code
             <input
-              className="border border-black/15 px-3 py-3 font-normal uppercase"
+              className="min-h-12 border border-black/15 px-3 py-3 text-base font-normal uppercase"
               onChange={(event) => props.setJoinCode(event.target.value)}
               placeholder="WC2026"
               value={props.joinCode}
             />
           </label>
           <button
-            className="mt-4 w-full bg-[#103d35] px-5 py-3 font-semibold text-white disabled:bg-black/15"
+            className="mt-4 min-h-12 w-full bg-[#103d35] px-5 py-3 font-semibold text-white disabled:bg-black/15"
             disabled={props.saving}
             onClick={props.joinLeague}
             type="button"
@@ -699,12 +719,12 @@ function LeaguePanel(props: {
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50">
               Invite code
             </div>
-            <div className="mt-2 text-4xl font-semibold tracking-[0.12em]">
+            <div className="mt-2 break-all font-mono text-3xl font-semibold tracking-[0.12em] sm:text-4xl">
               {props.inviteCode}
             </div>
           </div>
           <button
-            className="mt-4 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
+            className="mt-4 min-h-12 w-full bg-[#f4c84b] px-5 py-3 font-semibold text-black disabled:bg-black/15"
             disabled={!props.isHost || props.members.length < 2}
             onClick={props.lockDraftOrder}
             type="button"
@@ -718,7 +738,7 @@ function LeaguePanel(props: {
           ) : null}
           {props.isHost ? (
             <button
-              className="mt-3 w-full border border-red-800/30 bg-white px-5 py-3 font-semibold text-red-800 disabled:opacity-45"
+              className="mt-3 min-h-12 w-full border border-red-800/30 bg-white px-5 py-3 font-semibold text-red-800 disabled:opacity-45"
               disabled={props.saving}
               onClick={props.deleteRoom}
               type="button"
@@ -741,7 +761,7 @@ function LeaguePanel(props: {
         <div className="grid gap-2">
           {props.members.map((member, index) => (
             <div
-              className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-black/10 py-3"
+              className="grid grid-cols-[auto_1fr] gap-3 border-b border-black/10 py-3 sm:grid-cols-[auto_1fr_auto] sm:items-center"
               key={member.id}
             >
               <span className="grid size-8 place-items-center bg-[#103d35] text-sm font-semibold text-white">
@@ -757,7 +777,7 @@ function LeaguePanel(props: {
               </span>
               {props.isHost && !member.isHost && !props.draftOrder.length ? (
                 <button
-                  className="border border-black/15 px-3 py-2 text-xs font-semibold"
+                  className="col-span-2 min-h-10 border border-black/15 px-3 py-2 text-xs font-semibold sm:col-span-1"
                   onClick={() => props.removeMember(member.id)}
                   type="button"
                 >
@@ -806,14 +826,14 @@ function DraftPanel(props: {
     props.isHost || props.currentUserMember?.id === props.currentMember?.id;
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-      <div className="grid gap-5">
+    <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+      <div className="grid gap-4 sm:gap-5">
         <Panel title="On The Clock">
-          <div className="bg-[#103d35] p-5 text-white">
+          <div className="bg-[#103d35] p-4 text-white sm:p-5">
             <p className="text-xs uppercase tracking-[0.18em] text-[#f4c84b]">
               Current pick
             </p>
-            <h2 className="mt-2 text-3xl font-semibold">
+            <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">
               {props.currentMember?.name ?? "Draft complete"}
             </h2>
             <p className="mt-2 text-sm text-white/70">
@@ -873,13 +893,13 @@ function DraftPanel(props: {
         ) : null}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <input
-            className="border border-black/15 bg-white px-3 py-3 outline-none focus:border-[#103d35]"
+            className="min-h-12 border border-black/15 bg-white px-3 py-3 text-base outline-none focus:border-[#103d35]"
             onChange={(event) => props.setQuery(event.target.value)}
             placeholder="Search player or nation"
             value={props.query}
           />
           <select
-            className="border border-black/15 bg-white px-3 py-3 outline-none focus:border-[#103d35]"
+            className="min-h-12 border border-black/15 bg-white px-3 py-3 text-base outline-none focus:border-[#103d35]"
             onChange={(event) => props.setPosition(event.target.value)}
             value={props.position}
           >
@@ -894,7 +914,7 @@ function DraftPanel(props: {
         <div className="mt-4 grid gap-2">
           {props.availablePlayers.map((player) => (
             <button
-              className="grid grid-cols-[1fr_auto] items-center gap-4 border border-black/10 bg-white p-4 text-left transition enabled:hover:border-[#103d35] disabled:opacity-45"
+              className="grid grid-cols-[1fr_auto] items-center gap-3 border border-black/10 bg-white p-3 text-left transition enabled:hover:border-[#103d35] disabled:opacity-45 sm:gap-4 sm:p-4"
               disabled={!canPick}
               key={player.id}
               onClick={() => props.draftPlayer(player)}
@@ -954,7 +974,7 @@ function ScoresPanel(props: {
             {Object.entries(props.rosters).flatMap(([memberId, roster]) =>
               roster.map((player) => (
                 <div
-                  className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-b border-black/10 py-2"
+                  className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-b border-black/10 py-3"
                   key={`${memberId}-${player.id}`}
                 >
                   <span>
@@ -967,7 +987,7 @@ function ScoresPanel(props: {
                     </span>
                   </span>
                   <button
-                    className="size-9 border border-black/15 bg-white font-semibold disabled:opacity-40"
+                    className="size-10 border border-black/15 bg-white font-semibold disabled:opacity-40"
                     disabled={!props.isHost}
                     onClick={() => props.nudgeScore(player.id, -1)}
                     type="button"
@@ -978,7 +998,7 @@ function ScoresPanel(props: {
                     {props.scores[player.id] ?? 0}
                   </span>
                   <button
-                    className="size-9 border border-black/15 bg-white font-semibold disabled:opacity-40"
+                    className="size-10 border border-black/15 bg-white font-semibold disabled:opacity-40"
                     disabled={!props.isHost}
                     onClick={() => props.nudgeScore(player.id, 1)}
                     type="button"
@@ -1031,8 +1051,8 @@ function LoadingScreen(props: { status: string }) {
 
 function Panel(props: { children: React.ReactNode; title: string }) {
   return (
-    <section className="rounded-lg border border-black/10 bg-white p-5 shadow-sm">
-      <h2 className="text-xl font-semibold">{props.title}</h2>
+    <section className="rounded-lg border border-black/10 bg-white p-4 shadow-sm sm:p-5">
+      <h2 className="text-lg font-semibold sm:text-xl">{props.title}</h2>
       <div className="mt-4">{props.children}</div>
     </section>
   );
@@ -1040,17 +1060,17 @@ function Panel(props: { children: React.ReactNode; title: string }) {
 
 function RuleRow(props: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-black/10 py-3 text-sm">
+    <div className="grid gap-1 border-b border-black/10 py-3 text-sm sm:flex sm:items-center sm:justify-between sm:gap-4">
       <span className="text-black/60">{props.label}</span>
-      <span className="text-right font-semibold">{props.value}</span>
+      <span className="font-semibold sm:text-right">{props.value}</span>
     </div>
   );
 }
 
 function Stat(props: { label: string; value: string }) {
   return (
-    <div className="min-w-20 border border-white/18 px-3 py-2">
-      <div className="text-lg font-semibold">{props.value}</div>
+    <div className="min-w-0 border border-white/18 px-2 py-2 sm:min-w-20 sm:px-3">
+      <div className="text-base font-semibold sm:text-lg">{props.value}</div>
       <div className="text-xs uppercase tracking-[0.14em] text-white/55">
         {props.label}
       </div>
