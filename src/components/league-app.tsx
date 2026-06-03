@@ -534,7 +534,7 @@ export function LeagueApp() {
           <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#f4c84b]">
-                Private World Cup fantasy
+                World Cup Fantasy 2026
               </p>
               <h1 className="mt-2 text-2xl font-semibold leading-tight sm:text-4xl">
                 {leagueName}
@@ -661,7 +661,7 @@ function RoomGate(props: {
       <section className="bg-[#103d35] px-4 py-7 text-white sm:py-10">
         <div className="mx-auto max-w-5xl">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#f4c84b]">
-            Private World Cup fantasy
+            World Cup Fantasy 2026
           </p>
           <h1 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight sm:text-5xl">
             Create a room or join your friends.
