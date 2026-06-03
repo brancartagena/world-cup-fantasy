@@ -38,6 +38,13 @@ type MemberRow = {
   is_host: boolean;
 };
 
+type PlayerRow = {
+  id: string;
+  name: string;
+  position: string;
+  teams: { name: string } | null;
+};
+
 type LeagueStateRow = {
   draft_order: string[] | null;
   picks: Pick[] | null;
@@ -60,6 +67,7 @@ export function LeagueApp() {
   const [activeTab, setActiveTab] = useState<Tab>("league");
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState("ALL");
+  const [playerPool, setPlayerPool] = useState<DraftPlayer[]>(samplePlayers);
   const [timer, setTimer] = useState(120);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [userId, setUserId] = useState("");
@@ -101,7 +109,7 @@ export function LeagueApp() {
     ) as Record<string, DraftPlayer[]>;
   }, [members, picks]);
 
-  const availablePlayers = samplePlayers.filter((player) => {
+  const availablePlayers = playerPool.filter((player) => {
     const matchesQuery = `${player.name} ${player.team}`
       .toLowerCase()
       .includes(query.toLowerCase());
@@ -144,12 +152,16 @@ export function LeagueApp() {
       return;
     }
 
-    const { error: memberError } = await supabase.from("league_members").insert({
-      league_id: league.id,
-      user_id: userId,
-      display_name: trimmedDisplayName,
-      is_host: true,
-    });
+    const { data: hostMember, error: memberError } = await supabase
+      .from("league_members")
+      .insert({
+        league_id: league.id,
+        user_id: userId,
+        display_name: trimmedDisplayName,
+        is_host: true,
+      })
+      .select("id,display_name,user_id,is_host")
+      .single<MemberRow>();
 
     const { error: stateError } = await supabase.from("league_states").insert({
       league_id: league.id,
@@ -158,7 +170,7 @@ export function LeagueApp() {
       scores: {},
     });
 
-    if (memberError || stateError) {
+    if (memberError || !hostMember || stateError) {
       setStatus(memberError?.message ?? stateError?.message ?? "Setup failed.");
       setSaving(false);
       return;
@@ -170,10 +182,10 @@ export function LeagueApp() {
     setInviteCode(league.invite_code);
     setMembers([
       {
-        id: userId,
+        id: hostMember.id,
         isHost: true,
-        name: trimmedDisplayName,
-        userId,
+        name: hostMember.display_name,
+        userId: hostMember.user_id,
       },
     ]);
     setDraftOrder([]);
@@ -264,6 +276,28 @@ export function LeagueApp() {
     }
   }
 
+  async function loadPlayers() {
+    const { data, error } = await supabase
+      .from("players")
+      .select("id,name,position,teams(name)")
+      .order("name", { ascending: true })
+      .returns<PlayerRow[]>();
+
+    if (error || !data?.length) {
+      setPlayerPool(samplePlayers);
+      return;
+    }
+
+    setPlayerPool(
+      data.map((player) => ({
+        id: player.id,
+        name: player.name,
+        position: normalizePosition(player.position),
+        team: player.teams?.name ?? "Unknown",
+      })),
+    );
+  }
+
   useEffect(() => {
     async function boot() {
       const {
@@ -279,6 +313,7 @@ export function LeagueApp() {
       }
 
       setUserId(activeSession.user.id);
+      await loadPlayers();
 
       const savedLeagueId = window.localStorage.getItem(activeLeagueKey);
       if (savedLeagueId) {
@@ -433,7 +468,7 @@ export function LeagueApp() {
       return;
     }
 
-    if (!isHost && currentUserMember?.id !== currentMemberId) {
+    if (currentUserMember?.id !== currentMemberId) {
       window.alert("It is not your pick.");
       return;
     }
@@ -584,6 +619,7 @@ export function LeagueApp() {
             isHost={isHost}
             members={members}
             picks={picks}
+            playerCount={playerPool.length}
             position={position}
             query={query}
             rosters={rosters}
@@ -805,6 +841,7 @@ function DraftPanel(props: {
   isHost: boolean;
   members: Member[];
   picks: Pick[];
+  playerCount: number;
   position: string;
   query: string;
   rosters: Record<string, DraftPlayer[]>;
@@ -822,8 +859,7 @@ function DraftPanel(props: {
     );
   }
 
-  const canPick =
-    props.isHost || props.currentUserMember?.id === props.currentMember?.id;
+  const canPick = props.currentUserMember?.id === props.currentMember?.id;
 
   return (
     <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
@@ -891,6 +927,9 @@ function DraftPanel(props: {
             Waiting for {props.currentMember?.name} to pick.
           </p>
         ) : null}
+        <p className="mb-4 text-sm text-black/55">
+          {props.playerCount} players loaded.
+        </p>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <input
             className="min-h-12 border border-black/15 bg-white px-3 py-3 text-base outline-none focus:border-[#103d35]"
@@ -1102,4 +1141,17 @@ function createInviteCode() {
   }
 
   return code;
+}
+
+function normalizePosition(position: string): DraftPlayer["position"] {
+  const normalized = position.toUpperCase();
+
+  if (["GK", "DEF", "MID", "FWD"].includes(normalized)) {
+    return normalized as DraftPlayer["position"];
+  }
+
+  if (normalized.includes("GOAL")) return "GK";
+  if (normalized.includes("DEF")) return "DEF";
+  if (normalized.includes("MID")) return "MID";
+  return "FWD";
 }
